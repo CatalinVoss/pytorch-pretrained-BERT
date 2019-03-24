@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 Google AI, Google Brain and Carnegie Mellon University Authors and the HugginFace Inc. team.
+# Copyright 2018 Google AI, Google Brain and Carnegie Mellon University Authors and the HuggingFace Inc. team.
 # Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -112,8 +112,7 @@ def main():
         with torch.no_grad():
             mems = None
             for idx, (data, target, seq_len) in enumerate(eval_iter):
-                ret = model(data, target, mems)
-                loss, mems = ret
+                loss, mems = model(data, target, mems)
                 loss = loss.mean()
                 total_loss += seq_len * loss.item()
                 total_len += seq_len

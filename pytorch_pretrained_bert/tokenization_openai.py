@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The Open AI Team Authors and The HugginFace Inc. team.
+# Copyright 2018 The Open AI Team Authors and The HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ from io import open
 from tqdm import tqdm
 
 from .file_utils import cached_path
-from .tokenization import BasicTokenizer
+from .tokenization import BasicTokenizer, Tokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ def text_standardize(text):
     text = re.sub(r'[^\S\n]+', ' ', text)
     return text.strip()
 
-class OpenAIGPTTokenizer(object):
+class OpenAIGPTTokenizer(Tokenizer):
     """
     BPE tokenizer. Peculiarities:
         - lower case all inputs
@@ -250,7 +250,10 @@ class OpenAIGPTTokenizer(object):
                 tokens.append(self.decoder[i])
         return tokens
 
-    def decode(self, ids, skip_special_tokens=False, clean_up_tokenization_spaces=False):
+    def encode(self, text):
+        return self.convert_tokens_to_ids(self.tokenize(text))
+
+    def decode(self, ids, skip_special_tokens=False, clean_up_tokenization_spaces=True):
         """Converts a sequence of ids in a string."""
         tokens = self.convert_ids_to_tokens(ids, skip_special_tokens=skip_special_tokens)
         out_string = ''.join(tokens).replace('</w>', ' ').strip()
