@@ -131,6 +131,7 @@ This package comprises the following classes that can be imported in Python and 
 - Configuration classes for BERT, OpenAI GPT and Transformer-XL (in the respective [`modeling.py`](./pytorch_pretrained_bert/modeling.py), [`modeling_openai.py`](./pytorch_pretrained_bert/modeling_openai.py), [`modeling_transfo_xl.py`](./pytorch_pretrained_bert/modeling_transfo_xl.py) files):
   - `BertConfig` - Configuration class to store the configuration of a `BertModel` with utilities to read and write from JSON configuration files.
   - `OpenAIGPTConfig` - Configuration class to store the configuration of a `OpenAIGPTModel` with utilities to read and write from JSON configuration files.
+  - `GPT2Config` - Configuration class to store the configuration of a `GPT2Model` with utilities to read and write from JSON configuration files.
   - `TransfoXLConfig` - Configuration class to store the configuration of a `TransfoXLModel` with utilities to read and write from JSON configuration files.
 
 The repository further comprises:
@@ -140,7 +141,7 @@ The repository further comprises:
   - [`run_classifier.py`](./examples/run_classifier.py) - Show how to fine-tune an instance of `BertForSequenceClassification` on GLUE's MRPC task,
   - [`run_squad.py`](./examples/run_squad.py) - Show how to fine-tune an instance of `BertForQuestionAnswering` on SQuAD v1.0 and SQuAD v2.0 tasks.
   - [`run_swag.py`](./examples/run_swag.py) - Show how to fine-tune an instance of `BertForMultipleChoice` on Swag task.
-  - [`run_lm_finetuning.py`](./examples/run_lm_finetuning.py) - Show how to fine-tune an instance of `BertForPretraining` on a target text corpus.
+  - [`simple_lm_finetuning.py`](./examples/lm_finetuning/simple_lm_finetuning.py) - Show how to fine-tune an instance of `BertForPretraining` on a target text corpus.
 
 - One example on how to use **OpenAI GPT** (in the [`examples` folder](./examples)):
   - [`run_openai_gpt.py`](./examples/run_openai_gpt.py) - Show how to fine-tune an instance of `OpenGPTDoubleHeadsModel` on the RocStories task.
@@ -461,12 +462,14 @@ Here is a detailed documentation of the classes in the package and how to use th
 
 | Sub-section | Description |
 |-|-|
-| [Loading Google AI's/OpenAI's pre-trained weigths](#loading-google-ai-or-openai-pre-trained-weigths-or-pytorch-dump) | How to load Google AI/OpenAI's pre-trained weight or a PyTorch saved instance |
-| [PyTorch models](#PyTorch-models) | API of the BERT, GPT, GPT-2 and Transformer-XL PyTorch model classes |
+| [Loading pre-trained weights](#loading-google-ai-or-openai-pre-trained-weights-or-pytorch-dump) | How to load Google AI/OpenAI's pre-trained weight or a PyTorch saved instance |
+| [Serialization best-practices](#serialization-best-practices) | How to save and reload a fine-tuned model |
+| [Configurations](#configurations) | API of the configuration classes for BERT, GPT, GPT-2 and Transformer-XL |
+| [Models](#models) | API of the PyTorch model classes for BERT, GPT, GPT-2 and Transformer-XL |
 | [Tokenizers](#tokenizers) | API of the tokenizers class for BERT, GPT, GPT-2 and Transformer-XL|
-| [Optimizers](#optimizerss) |  API of the optimizers |
+| [Optimizers](#optimizers) |  API of the optimizers |
 
-### Loading Google AI or OpenAI pre-trained weigths or PyTorch dump
+### Loading Google AI or OpenAI pre-trained weights or PyTorch dump
 
 To load one of Google AI's, OpenAI's pre-trained models or a PyTorch saved model (an instance of `BertForPreTraining` saved with `torch.save()`), the PyTorch model classes and the tokenizer can be instantiated as
 
@@ -524,7 +527,101 @@ model = GPT2Model.from_pretrained('gpt2')
 
 ```
 
-### PyTorch models
+### Serialization best-practices
+
+This section explain how you can save and re-load a fine-tuned model (BERT, GPT, GPT-2 and Transformer-XL).
+There are three types of files you need to save to be able to reload a fine-tuned model:
+
+- the model it-self which should be saved following PyTorch serialization [best practices](https://pytorch.org/docs/stable/notes/serialization.html#best-practices),
+- the configuration file of the model which is saved as a JSON file, and
+- the vocabulary (and the merges for the BPE-based models GPT and GPT-2).
+
+Here is the recommended way of saving the model, configuration and vocabulary to an `output_dir` directory and reloading the model and tokenizer afterwards:
+
+```python
+from pytorch_pretrained_bert import WEIGHTS_NAME, CONFIG_NAME
+
+output_dir = "./models/"
+
+# Step 1: Save a model, configuration and vocabulary that you have fine-tuned
+
+# If we have a distributed model, save only the encapsulated model
+# (it was wrapped in PyTorch DistributedDataParallel or DataParallel)
+model_to_save = model.module if hasattr(model, 'module') else model
+
+# If we save using the predefined names, we can load using `from_pretrained`
+output_model_file = os.path.join(output_dir, WEIGHTS_NAME)
+output_config_file = os.path.join(output_dir, CONFIG_NAME)
+
+torch.save(model_to_save.state_dict(), output_model_file)
+model_to_save.config.to_json_file(output_config_file)
+tokenizer.save_vocabulary(output_dir)
+
+# Step 2: Re-load the saved model and vocabulary
+
+# Example for a Bert model
+model = BertForQuestionAnswering.from_pretrained(output_dir)
+tokenizer = BertTokenizer.from_pretrained(output_dir, do_lower_case=args.do_lower_case)  # Add specific options if needed
+# Example for a GPT model
+model = OpenAIGPTDoubleHeadsModel.from_pretrained(output_dir)
+tokenizer = OpenAIGPTTokenizer.from_pretrained(output_dir)
+```
+
+Here is another way you can save and reload the model if you want to use specific paths for each type of files:
+
+```python
+output_model_file = "./models/my_own_model_file.bin"
+output_config_file = "./models/my_own_config_file.bin"
+output_vocab_file = "./models/my_own_vocab_file.bin"
+
+# Step 1: Save a model, configuration and vocabulary that you have fine-tuned
+
+# If we have a distributed model, save only the encapsulated model
+# (it was wrapped in PyTorch DistributedDataParallel or DataParallel)
+model_to_save = model.module if hasattr(model, 'module') else model
+
+torch.save(model_to_save.state_dict(), output_model_file)
+model_to_save.config.to_json_file(output_config_file)
+tokenizer.save_vocabulary(output_vocab_file)
+
+# Step 2: Re-load the saved model and vocabulary
+
+# We didn't save using the predefined WEIGHTS_NAME, CONFIG_NAME names, we cannot load using `from_pretrained`.
+# Here is how to do it in this situation:
+
+# Example for a Bert model
+config = BertConfig.from_json_file(output_config_file)
+model = BertForQuestionAnswering(config)
+state_dict = torch.load(output_model_file)
+model.load_state_dict(state_dict)
+tokenizer = BertTokenizer(output_vocab_file, do_lower_case=args.do_lower_case)
+
+# Example for a GPT model
+config = OpenAIGPTConfig.from_json_file(output_config_file)
+model = OpenAIGPTDoubleHeadsModel(config)
+state_dict = torch.load(output_model_file)
+model.load_state_dict(state_dict)
+tokenizer = OpenAIGPTTokenizer(output_vocab_file)
+```
+
+### Configurations
+
+Models (BERT, GPT, GPT-2 and Transformer-XL) are defined and build from configuration classes which containes the parameters of the models (number of layers, dimensionalities...) and a few utilities to read and write from JSON configuration files. The respective configuration classes are:
+
+- `BertConfig` for `BertModel` and BERT classes instances.
+- `OpenAIGPTConfig` for `OpenAIGPTModel` and OpenAI GPT classes instances.
+- `GPT2Config` for `GPT2Model` and OpenAI GPT-2 classes instances.
+- `TransfoXLConfig` for `TransfoXLModel` and Transformer-XL classes instances.
+
+These configuration classes contains a few utilities to load and save configurations:
+
+- `from_dict(cls, json_object)`: A class method to construct a configuration from a Python dictionary of parameters. Returns an instance of the configuration class.
+- `from_json_file(cls, json_file)`: A class method to construct a configuration from a json file of parameters. Returns an instance of the configuration class.
+- `to_dict()`: Serializes an instance to a Python dictionary. Returns a dictionary.
+- `to_json_string()`: Serializes an instance to a JSON string. Returns a string.
+- `to_json_file(json_file_path)`: Save an instance to a json file.
+
+### Models
 
 #### 1. `BertModel`
 
@@ -796,8 +893,7 @@ This model *outputs*:
   - `multiple_choice_logits`: the multiple choice logits as a torch.FloatTensor of size [batch_size, num_choices]
   - `presents`: a list of pre-computed hidden-states (key and values in each attention blocks) as a torch.FloatTensors. They can be reused to speed up sequential decoding (see the `run_gpt2.py` example).
 
-
-### Tokenizers:
+### Tokenizers
 
 #### `BertTokenizer`
 
@@ -816,6 +912,7 @@ and three methods:
 - `tokenize(text)`: convert a `str` in a list of `str` tokens by (1) performing basic tokenization and (2) WordPiece tokenization.
 - `convert_tokens_to_ids(tokens)`: convert a list of `str` tokens in a list of `int` indices in the vocabulary.
 - `convert_ids_to_tokens(tokens)`: convert a list of `int` indices in a list of `str` tokens in the vocabulary.
+- `save_vocabulary(directory_path)`: save the vocabulary file to `directory_path`. Return the path to the saved vocabulary file: `vocab_file_path`. The vocabulary can be reloaded with `BertTokenizer.from_pretrained('vocab_file_path')` or `BertTokenizer.from_pretrained('directory_path')`.
 
 Please refer to the doc strings and code in [`tokenization.py`](./pytorch_pretrained_bert/tokenization.py) for the details of the `BasicTokenizer` and `WordpieceTokenizer` classes. In general it is recommended to use `BertTokenizer` unless you know what you are doing.
 
@@ -832,17 +929,21 @@ This class has four arguments:
 
 and five methods:
 
-- `tokenize(text)`: convert a `str` in a list of `str` tokens by (1) performing basic tokenization and (2) WordPiece tokenization.
+- `tokenize(text)`: convert a `str` in a list of `str` tokens by performing BPE tokenization.
 - `convert_tokens_to_ids(tokens)`: convert a list of `str` tokens in a list of `int` indices in the vocabulary.
 - `convert_ids_to_tokens(tokens)`: convert a list of `int` indices in a list of `str` tokens in the vocabulary.
 - `set_special_tokens(self, special_tokens)`: update the list of special tokens (see above arguments)
+- `encode(text)`: convert a `str` in a list of `int` tokens by performing BPE encoding.
 - `decode(ids, skip_special_tokens=False, clean_up_tokenization_spaces=False)`: decode a list of `int` indices in a string and do some post-processing if needed: (i) remove special tokens from the output and (ii) clean up tokenization spaces.
+- `save_vocabulary(directory_path)`: save the vocabulary, merge and special tokens files to `directory_path`. Return the path to the three files: `vocab_file_path`, `merge_file_path`, `special_tokens_file_path`. The vocabulary can be reloaded with `OpenAIGPTTokenizer.from_pretrained('directory_path')`.
 
 Please refer to the doc strings and code in [`tokenization_openai.py`](./pytorch_pretrained_bert/tokenization_openai.py) for the details of the `OpenAIGPTTokenizer`.
 
 #### `TransfoXLTokenizer`
 
 `TransfoXLTokenizer` perform word tokenization. This tokenizer can be used for adaptive softmax and has utilities for counting tokens in a corpus to create a vocabulary ordered by toekn frequency (for adaptive softmax). See the adaptive softmax paper ([Efficient softmax approximation for GPUs](http://arxiv.org/abs/1609.04309)) for more details.
+
+The API is similar to the API of `BertTokenizer` (see above).
 
 Please refer to the doc strings and code in [`tokenization_transfo_xl.py`](./pytorch_pretrained_bert/tokenization_transfo_xl.py) for the details of these additional methods in `TransfoXLTokenizer`.
 
@@ -858,13 +959,17 @@ This class has three arguments:
 
 and two methods:
 
+- `tokenize(text)`: convert a `str` in a list of `str` tokens by performing byte-level BPE.
+- `convert_tokens_to_ids(tokens)`: convert a list of `str` tokens in a list of `int` indices in the vocabulary.
+- `convert_ids_to_tokens(tokens)`: convert a list of `int` indices in a list of `str` tokens in the vocabulary.
+- `set_special_tokens(self, special_tokens)`: update the list of special tokens (see above arguments)
 - `encode(text)`: convert a `str` in a list of `int` tokens by performing byte-level BPE.
 - `decode(tokens)`: convert back a list of `int` tokens in a `str`.
+- `save_vocabulary(directory_path)`: save the vocabulary, merge and special tokens files to `directory_path`. Return the path to the three files: `vocab_file_path`, `merge_file_path`, `special_tokens_file_path`. The vocabulary can be reloaded with `OpenAIGPTTokenizer.from_pretrained('directory_path')`.
 
 Please refer to [`tokenization_gpt2.py`](./pytorch_pretrained_bert/tokenization_gpt2.py) for more details on the `GPT2Tokenizer`.
 
-
-### Optimizers:
+### Optimizers
 
 #### `BertAdam`
 
@@ -927,10 +1032,59 @@ Where `$THIS_MACHINE_INDEX` is an sequential index assigned to each of your mach
 
 We showcase several fine-tuning examples based on (and extended from) [the original implementation](https://github.com/google-research/bert/):
 
-- a *sequence-level classifier* on the MRPC classification corpus,
+- a *sequence-level classifier* on nine different GLUE tasks,
 - a *token-level classifier* on the question answering dataset SQuAD, and
 - a *sequence-level multiple-choice classifier* on the SWAG classification corpus.
 - a *BERT language model* on another target corpus
+
+#### GLUE results on dev set
+
+We get the following results on the dev set of GLUE benchmark with an uncased BERT base 
+model. All experiments were run on a P100 GPU with a batch size of 32.
+
+| Task | Metric | Result |
+|-|-|-|
+| CoLA | Matthew's corr. | 57.29 |
+| SST-2 | accuracy | 93.00 |
+| MRPC | F1/accuracy | 88.85/83.82 |
+| STS-B | Pearson/Spearman corr. | 89.70/89.37 |
+| QQP | accuracy/F1 | 90.72/87.41 |
+| MNLI | matched acc./mismatched acc.| 83.95/84.39 |
+| QNLI | accuracy | 89.04 |
+| RTE | accuracy | 61.01 |
+| WNLI | accuracy | 53.52 |
+
+Some of these results are significantly different from the ones reported on the test set
+of GLUE benchmark on the website. For QQP and WNLI, please refer to [FAQ #12](https://gluebenchmark.com/faq) on the webite.
+
+Before running anyone of these GLUE tasks you should download the
+[GLUE data](https://gluebenchmark.com/tasks) by running
+[this script](https://gist.github.com/W4ngatang/60c2bdb54d156a41194446737ce03e2e)
+and unpack it to some directory `$GLUE_DIR`.
+
+```shell
+export GLUE_DIR=/path/to/glue
+export TASK_NAME=MRPC
+
+python run_classifier.py \
+  --task_name $TASK_NAME \
+  --do_train \
+  --do_eval \
+  --do_lower_case \
+  --data_dir $GLUE_DIR/$TASK_NAME \
+  --bert_model bert-base-uncased \
+  --max_seq_length 128 \
+  --train_batch_size 32 \
+  --learning_rate 2e-5 \
+  --num_train_epochs 3.0 \
+  --output_dir /tmp/$TASK_NAME/
+```
+
+where task name can be one of CoLA, SST-2, MRPC, STS-B, QQP, MNLI, QNLI, RTE, WNLI.
+
+The dev set results will be present within the text file 'eval_results.txt' in the specified output_dir. In case of MNLI, since there are two separate dev sets, matched and mismatched, there will be a separate output folder called '/tmp/MNLI-MM/' in addition to '/tmp/MNLI/'.
+
+The code has not been tested with half-precision training with apex on any GLUE task apart from MRPC, MNLI, CoLA, SST-2. The following section provides details on how to run half-precision training with MRPC. With that being said, there shouldn't be any issues in running half-precision training with the remaining GLUE tasks as well, since the data processor for each task inherits from the base class DataProcessor.
 
 #### MRPC
 
@@ -1051,18 +1205,7 @@ You can download an [exemplary training corpus](https://ext-bert-sample.obs.eu-d
 Training one epoch on this corpus takes about 1:20h on 4 x NVIDIA Tesla P100 with `train_batch_size=200` and `max_seq_length=128`:
 
 
-```shell
-python run_lm_finetuning.py \
-  --bert_model bert-base-uncased \
-  --do_lower_case \
-  --do_train \
-  --train_file ../samples/sample_text.txt \
-  --output_dir models \
-  --num_train_epochs 5.0 \
-  --learning_rate 3e-5 \
-  --train_batch_size 32 \
-  --max_seq_length 128 \
-```
+Thank to the work of @Rocketknight1 and @tholor there are now **several scripts** that can be used to fine-tune BERT using the pretraining objective (combination of masked-language modeling and next sentence prediction loss). These scripts are detailed in the [`README`](./examples/lm_finetuning/README.md) of the [`examples/lm_finetuning/`](./examples/lm_finetuning/) folder.
 
 ### OpenAI GPT, Transformer-XL and GPT-2: running the examples
 
@@ -1136,18 +1279,20 @@ To get these results we used a combination of:
 
 Here is the full list of hyper-parameters for this run:
 ```bash
+export SQUAD_DIR=/path/to/SQUAD
+
 python ./run_squad.py \
   --bert_model bert-large-uncased \
   --do_train \
   --do_predict \
   --do_lower_case \
-  --train_file $SQUAD_TRAIN \
-  --predict_file $SQUAD_EVAL \
+  --train_file $SQUAD_DIR/train-v1.1.json \
+  --predict_file $SQUAD_DIR/dev-v1.1.json \
   --learning_rate 3e-5 \
   --num_train_epochs 2 \
   --max_seq_length 384 \
   --doc_stride 128 \
-  --output_dir $OUTPUT_DIR \
+  --output_dir /tmp/debug_squad/ \
   --train_batch_size 24 \
   --gradient_accumulation_steps 2
 ```
@@ -1156,18 +1301,20 @@ If you have a recent GPU (starting from NVIDIA Volta series), you should try **1
 
 Here is an example of hyper-parameters for a FP16 run we tried:
 ```bash
+export SQUAD_DIR=/path/to/SQUAD
+
 python ./run_squad.py \
   --bert_model bert-large-uncased \
   --do_train \
   --do_predict \
   --do_lower_case \
-  --train_file $SQUAD_TRAIN \
-  --predict_file $SQUAD_EVAL \
+  --train_file $SQUAD_DIR/train-v1.1.json \
+  --predict_file $SQUAD_DIR/dev-v1.1.json \
   --learning_rate 3e-5 \
   --num_train_epochs 2 \
   --max_seq_length 384 \
   --doc_stride 128 \
-  --output_dir $OUTPUT_DIR \
+  --output_dir /tmp/debug_squad/ \
   --train_batch_size 24 \
   --fp16 \
   --loss_scale 128
@@ -1196,9 +1343,9 @@ A command-line interface is provided to convert a TensorFlow checkpoint in a PyT
 
 ### BERT
 
-You can convert any TensorFlow checkpoint for BERT (in particular [the pre-trained models released by Google](https://github.com/google-research/bert#pre-trained-models)) in a PyTorch save file by using the [`./pytorch_pretrained_bert/convert_tf_checkpoint_to_pytorch.py`](convert_tf_checkpoint_to_pytorch.py) script.
+You can convert any TensorFlow checkpoint for BERT (in particular [the pre-trained models released by Google](https://github.com/google-research/bert#pre-trained-models)) in a PyTorch save file by using the [`convert_tf_checkpoint_to_pytorch.py`](./pytorch_pretrained_bert/convert_tf_checkpoint_to_pytorch.py ) script.
 
-This CLI takes as input a TensorFlow checkpoint (three files starting with `bert_model.ckpt`) and the associated configuration file (`bert_config.json`), and creates a PyTorch model for this configuration, loads the weights from the TensorFlow checkpoint in the PyTorch model and saves the resulting model in a standard PyTorch save file that can be imported using `torch.load()` (see examples in [`extract_features.py`](./examples/extract_features.py), [`run_classifier.py`](./examples/run_classifier.py) and [`run_squad.py`]((./examples/run_squad.py))).
+This CLI takes as input a TensorFlow checkpoint (three files starting with `bert_model.ckpt`) and the associated configuration file (`bert_config.json`), and creates a PyTorch model for this configuration, loads the weights from the TensorFlow checkpoint in the PyTorch model and saves the resulting model in a standard PyTorch save file that can be imported using `torch.load()` (see examples in [`extract_features.py`](./examples/extract_features.py), [`run_classifier.py`](./examples/run_classifier.py) and [`run_squad.py`](./examples/run_squad.py)).
 
 You only need to run this conversion script **once** to get a PyTorch model. You can then disregard the TensorFlow checkpoint (the three files starting with `bert_model.ckpt`) but be sure to keep the configuration file (`bert_config.json`) and the vocabulary file (`vocab.txt`) as these are needed for the PyTorch model too.
 
